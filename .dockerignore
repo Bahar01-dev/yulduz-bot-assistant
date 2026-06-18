@@ -1,0 +1,21 @@
+# Секреты — НИКОГДА не в образе (Railway передаёт env-переменные в рантайме)
+.env
+.env.*
+!.env.example
+
+# Локальная БД и данные
+data/
+
+# Python-кеш и окружения
+__pycache__/
+*.pyc
+.venv/
+
+# Документация и архивы — не нужны в рантайме
+*.md
+idea.md
+research.md
+
+# Git
+.git/
+.gitignore
