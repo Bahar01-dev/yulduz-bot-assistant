@@ -203,7 +203,10 @@ async def on_refs(message: Message, state: FSMContext) -> None:
     # Очищаем FSM — онбординг окончен
     await state.clear()
 
-    # Резюме (дословно §7.1) + главное меню
+    # Резюме (дословно §7.1) + главное меню.
+    # parse_mode=None: резюме подставляет сырой пользовательский текст (ниша,
+    # аудитория, референс-ссылки с «_», «?», «&»), который ломает разбор Markdown
+    # в Telegram (TelegramBadRequest). Резюме — простой текст без разметки.
     summary = onboarding.build_summary(
         {
             "niche": niche,
@@ -212,7 +215,7 @@ async def on_refs(message: Message, state: FSMContext) -> None:
             "accounts": refs,
         }
     )
-    await message.answer(summary)
+    await message.answer(summary, parse_mode=None)
     await message.answer(MENU_PROMPT, reply_markup=main_menu_keyboard())
 
 

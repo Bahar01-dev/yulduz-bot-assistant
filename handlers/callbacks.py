@@ -31,7 +31,7 @@ from database import drafts, publications
 from prompts.post_prompt import POST_TEMPERATURE
 from prompts.reel_prompt import DEFAULT_DURATION, REEL_TEMPERATURE, SUPPORTED_DURATIONS
 from utils.errors import GenerationResult, alert_owner
-from utils.formatter import format_post, format_reel
+from utils.formatter import _escape_md, format_post, format_reel
 from utils.keyboards import (
     hooks_keyboard,
     main_menu_keyboard,
@@ -505,5 +505,7 @@ def _render_hooks_message(hooks: list[str]) -> str:
     """Собирает текст сообщения с тремя вариантами хука (как в §7.2)."""
     lines = ["✍️ *ТРИ ВАРИАНТА ХУКА* — выбери один:", ""]
     for idx, hook in enumerate(hooks, start=1):
-        lines.append(f"*{idx}.* {hook}")
+        # Хуки — вывод модели, могут содержать * _ ` [ → экранируем, иначе
+        # непарный символ ломает разбор Markdown в Telegram (TelegramBadRequest).
+        lines.append(f"*{idx}.* {_escape_md(hook)}")
     return "\n".join(lines)
