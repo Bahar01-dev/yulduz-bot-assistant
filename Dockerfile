@@ -16,6 +16,5 @@ COPY . .
 
 # Каталог для SQLite-базы; монтируется как Persistent Volume в Railway.
 RUN mkdir -p /app/data
-VOLUME ["/app/data"]
 
 CMD ["python", "main.py"]
