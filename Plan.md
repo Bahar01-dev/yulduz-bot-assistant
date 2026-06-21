@@ -77,7 +77,8 @@ Instagram-контента в стиле владельца: посты и сц�
 | 8. Меню, черновики, профиль | Полная навигация без тупиков | `handlers/menu.py` (роутер Фазы 8): /menu, черновики (список→карточка, формат по типу), просмотр профиля + пофайловое редактирование (ниша/аудитория/тон-мультивыбор/запреты/референсы), `ProfileEdit` FSM, клавиатуры списков/полей, синхронизация style_description. start.py-заглушки убраны. Smoke 8/8. 2026-06-18 | ✅ | — |
 | 9. Голосовой ввод (P1) | Голос → текст → поток поста/Reels | `safe_transcribe` (Groq Whisper large-v3, retry ×1, ситуация GROQ_ERROR), `handlers/voice.py` (F.voice → скачивание .ogg → расшифровка → «🎙 Услышал…» → route_text/тема потока), диспетчер по FSM (None/waiting_topic — обрабатываем, пошаговые диалоги — гайд), `route_text` вынесен из message.py, voice.router регистрируется при VOICE_ENABLED. Smoke 12/12. 2026-06-18 | ✅ | — |
 | 10. Деплой на Railway | Бот в проде, БД переживает рестарт | Dockerfile (python:3.12-slim, PYTHONUNBUFFERED, VOLUME /app/data) + `.dockerignore` (исключает .env/data); requirements.txt выровнен по протестированным версиям; CLAUDE.md-стек обновлён. Bot-Assistant вынесен в ОТДЕЛЬНЫЙ git-репо (ветка main, коммит 3e27f0f, 38 файлов, без секретов), `Bot-Assistant/` добавлен в .gitignore лендинга. 2026-06-18 | 🚧 | ждёт: создание GitHub-репо + Railway dashboard (env + Volume) + живой смоук — действия владельца |
-| 11. V2 (план на будущее) | Контент-план, тренды, обучение стилю | — | ⏳ | после MVP |
+| 11. V2 — обучение стилю, контент-план, тренды | Три фичи V2 из §18 реализованы | 11a обучение стилю (👍/👎 → `style_feedback` → примеры в промпт), 11b контент-план (`/план`, неделя/месяц), 11c тренды (`/тренды` через Tavily, гейт по ключу). Smoke 62/62, py_compile OK. 2026-06-20 | ✅ | тренды требуют `TAVILY_API_KEY` (действие владельца); живой смоук — Railway |
+| 12. V3 (план на будущее) | Ответы подписчикам, репурпозинг, аналитика | — | ⏳ | после V2 |
 
 ---
 
@@ -387,13 +388,63 @@ Instagram-контента в стиле владельца: посты и сц�
 
 ---
 
-### Фаза 11 — V2 (план на будущее, вне MVP) ⏳
+### Фаза 11 — V2: обучение стилю, контент-план, тренды ✅
 
-Реализуется после стабильного MVP. Детальная проработка — отдельной спекой.
-- Контент-план на неделю/месяц (`/план`).
-- Анализ конкурентов и трендов через Tavily (`/тренды`).
-- Система обучения стилю: [Одобрить]/[Отклонить] → `style_feedback` → примеры в промпт (spec §13.3).
+**Цель:** три фичи V2 из roadmap (spec §18), не ломая MVP-потоки.
+**Готовое состояние:** все три доступны из главного меню и командами; обработка
+ошибок и гейтинг по ключам — как у голоса (Groq).
+
+#### 11a — Обучение стилю (spec §13.3)
+
+| # | Задача | Файлы | QA | Статус |
+|---|---|---|---|---|
+| 11a.1 | CRUD обратной связи (`save`/`get_examples`, обрезка фрагмента) | `database/style_feedback.py` | save/select по вердикту | ✅ |
+| 11a.2 | Инъекция примеров в системный промпт (обратносовместимо) | `prompts/style_builder.py` | без примеров = V1 | ✅ |
+| 11a.3 | Проброс `style_examples` через агентов | `agents/post_writer.py`, `reel_writer.py` | примеры в промпте | ✅ |
+| 11a.4 | Кнопки 👍/👎 под постом и Reels | `utils/keyboards.py` | кнопки на месте | ✅ |
+| 11a.5 | Колбэки оценки → запись в `style_feedback` | `handlers/callbacks.py` | вердикт сохранён | ✅ |
+| 11a.6 | Загрузка примеров во всех точках генерации | `handlers/message.py`, `callbacks.py` | примеры подмешаны | ✅ |
+
+#### 11b — Контент-план (`/план`, spec §18)
+
+| # | Задача | Файлы | QA | Статус |
+|---|---|---|---|---|
+| 11b.1 | Промпт плана (неделя/месяц, маркер `ПЛАН:`) | `prompts/plan_prompt.py` | формат строгий | ✅ |
+| 11b.2 | Агент плана через `safe_generate` | `agents/planner.py` | план в стиле профиля | ✅ |
+| 11b.3 | Форматтер плана | `utils/formatter.py` (`format_plan`) | заголовок + экранирование | ✅ |
+| 11b.4 | FSM `PlanFlow` + клавиатуры периода/действий | `utils/state.py`, `keyboards.py` | переходы | ✅ |
+| 11b.5 | Хэндлер: `/план`, `menu:plan`, выбор периода, «Другой план» | `handlers/plan.py` | поток без тупиков | ✅ |
+| 11b.6 | Роутинг intent=plan из свободного текста | `handlers/message.py` | «контент-план…» → поток | ✅ |
+
+#### 11c — Тренды/конкуренты (`/тренды`, Tavily, spec §18, §17.1)
+
+| # | Задача | Файлы | QA | Статус |
+|---|---|---|---|---|
+| 11c.1 | Конфиг `TAVILY_API_KEY` + `TRENDS_ENABLED` | `config.py` | гейт по ключу | ✅ |
+| 11c.2 | Ситуация `SEARCH_ERROR` + `safe_search` (Tavily, retry ×1) | `utils/errors.py` | сбой → RU-сообщение | ✅ |
+| 11c.3 | Промпт трендов (поиск-запрос + разбор, маркер `РАЗБОР:`) | `prompts/trend_prompt.py` | формат строгий | ✅ |
+| 11c.4 | Агент: Tavily-поиск → сворачивание в разбор LLM | `agents/trend_analyst.py` | разбор по нише | ✅ |
+| 11c.5 | Форматтер трендов | `utils/formatter.py` (`format_trends`) | заголовок + экранирование | ✅ |
+| 11c.6 | FSM `TrendFlow` + клавиатура действий | `utils/state.py`, `keyboards.py` | переходы | ✅ |
+| 11c.7 | Хэндлер: `/тренды`, `menu:trend`, «Обновить», гейт ключа | `handlers/trends.py` | без ключа → подсказка | ✅ |
+| 11c.8 | Регистрация роутеров + пункты меню | `main.py`, `utils/keyboards.py` | меню обновлено | ✅ |
+
+**QA-чеклист (ручной, финальная живая проверка — Railway):** под постом/Reels
+кнопки 👍/👎 пишут в `style_feedback`, следующая генерация заметно ближе к стилю;
+`/план` → неделя/месяц → список идей без повтора тем; `/тренды` без ключа → подсказка
+про Tavily, с ключом → разбор; искусственный сбой Tavily → RU-сообщение, не тех.текст.
+**Критерии готовности:** ☑ три фичи в меню и командами ☑ обучение стилю не ломает V1
+(без примеров промпт идентичен) ☑ ошибки внешних API → RU ☑ тренды корректно
+выключены без ключа (как голос без Groq). Smoke 62/62, py_compile/compileall OK.
+
+---
+
+### Фаза 12 — V3 (план на будущее, вне V2) ⏳
+
+Реализуется после стабильного V2. Детальная проработка — отдельной спекой.
 - Ответы подписчикам (база FAQ).
+- Репурпозинг длинных текстов.
+- Аналитика Instagram.
 
 ---
 
@@ -423,4 +474,5 @@ Instagram-контента в стиле владельца: посты и сц�
 | 2026-06-20 | 10 | Багфикс по итогам живого теста на Railway. Краш на финальном шаге онбординга («Что-то пошло не так» + алерт владельцу): резюме (§7.1) подставляло сырой пользовательский текст — референс-ссылки Instagram с `_`/`?`/`&` — и уходило с дефолтным `parse_mode=MARKDOWN` → `TelegramBadRequest` (can't parse entities) → catch-all. Профиль при этом сохранялся (create() до отправки). Фикс: `start.py` шлёт резюме с `parse_mode=None`; `callbacks.py::_render_hooks_message` экранирует хуки через `_escape_md` (тот же класс бага — непарные `* _ \` [` в выводе модели). py_compile + smoke экранирования OK. Отдельно (операционное, не баг кода): `TelegramConflictError` в логах = два инстанса поллят один токен (локальный `python main.py` + Railway) — оставить один. |
 | 2026-06-18 | 10 | Фаза 10 (деплой-готовность). Создан `Dockerfile` (python:3.12-slim, `PYTHONUNBUFFERED=1`/`PYTHONDONTWRITEBYTECODE=1`, кеш-слой зависимостей, `mkdir -p /app/data`, `VOLUME ["/app/data"]`, `CMD python main.py`) и `.dockerignore` (исключает `.env`/`.env.*` кроме примера, `data/`, кеш, `*.md`, `.git`). `requirements.txt` выровнен по реально протестированным версиям (aiogram 3.29.0, anthropic 0.109.2, openai 2.43.0, groq 1.4.0) — устранён дрейф со старыми пинами, образ = протестированный код. CLAUDE.md: версии стека обновлены. **Решение по репо:** Bot-Assistant вынесен в ОТДЕЛЬНЫЙ git-репозиторий (`git init -b main`, коммит 3e27f0f, 38 файлов; dry-run и `git ls-files` подтвердили отсутствие `.env`/`data/`/`bot.db`), чтобы не смешивать с Vercel-репо лендинга; `Bot-Assistant/` добавлен в `.gitignore` лендинга. Локальная сборка образа не выполнена (Docker daemon выключен) — соберёт Railway. Осталось (действия владельца): создать GitHub-репо + push, Railway New Project → env + Volume `/app/data`, живой смоук по чеклисту. |
 | 2026-06-18 | 9 | Фаза 9 завершена: голосовой ввод. `utils/errors.py` — защищённый импорт `groq`/`AsyncGroq`, `WHISPER_MODEL` (whisper-large-v3, env-override), `safe_transcribe(audio, language='ru')` (зеркалит `safe_generate`: скачанные байты .ogg → Groq Whisper, ловит всё → ситуация GROQ_ERROR, retry ×1 по политике каталога, пустой результат → GROQ_ERROR, возвращает `GenerationResult`). `handlers/message.py` — маршрутизация вынесена из `handle_free_text` в переиспользуемую `route_text(message, text, state)`. `handlers/voice.py` — `@router.message(F.voice)`: диспетчер по FSM (обрабатываем только `None`/`PostFlow.waiting_topic`/`ReelFlow.waiting_topic`; иные состояния → гайд «продолжи текстом»), скачивание через `bot.download`, `safe_transcribe`, эхо «🎙 Услышал: «…» ✓» (parse_mode=None), затем `handle_post_request`/`handle_reel_request` (тема потока) или `route_text` (свободный запрос → оркестратор). `main.py` — `voice.router` регистрируется только при `config.VOICE_ENABLED`. Smoke 12/12 (safe_transcribe success/empty/exc/no-SDK + диспетчер по 4 состояниям + ошибка расшифровки), py_compile/compileall OK. |
+| 2026-06-20 | 11 | Фаза 11 (V2) завершена — три фичи из §18. **11a Обучение стилю:** `database/style_feedback.py` (`save`/`get_examples`, обрезка до 600 симв., сортировка `created_at DESC, id DESC`), `build_system_prompt` принимает `style_examples` и добавляет блок «ОБУЧЕНИЕ СТИЛЮ» (без примеров — промпт идентичен V1), проброс `style_examples` через `post_writer`/`reel_writer`/`planner`, кнопки 👍/👎 в `post_actions_keyboard`/`reel_actions_keyboard`, колбэки `post:approve/reject`+`reel:approve/reject` → `_save_style_feedback`, загрузка примеров в `_load_profile_and_topics` (3-tuple) и в `message.py`. **11b Контент-план:** `prompts/plan_prompt.py` (период неделя=7/месяц=12, маркер `ПЛАН:`, temp 0.6), `agents/planner.py`, `format_plan`, FSM `PlanFlow`, `plan_period_keyboard`/`plan_actions_keyboard`, `handlers/plan.py` (`/план`+`/plan`, `menu:plan`, `plan:period:*`, `plan:another`), intent=plan роутится в поток (убран `V2_TEXT`). **11c Тренды:** `config.TAVILY_API_KEY`/`TRENDS_ENABLED`, `utils/errors.py` — защищённый импорт `tavily`, ситуация `SEARCH_ERROR`, `safe_search` (зеркалит `safe_transcribe`, retry ×1), `prompts/trend_prompt.py` (маркер `РАЗБОР:`), `agents/trend_analyst.py` (Tavily-поиск → сворачивание LLM), `format_trends`, FSM `TrendFlow`, `trend_actions_keyboard`, `handlers/trends.py` (гейт по ключу как голос без Groq), пункты меню «🗓 Контент-план»/«📈 Тренды», `plan.router`/`trends.router` в `main.py`. `requirements.txt` += `tavily-python==0.5.0`, `.env.example` += `TAVILY_API_KEY`. **Важный фикс:** в колбэках `callback.message.from_user` = бот, поэтому `user_id` пробрасывается явно в `start_plan_flow`/`start_trend_flow`/`_generate_*`. Smoke 62/62 (16 стиль + 14 план + 18 тренды + 14 интеграция), py_compile/compileall OK. Осталось (владелец): `TAVILY_API_KEY` в Railway для трендов + живой смоук. |
 | 2026-06-18 | 7 | Фаза 7 завершена: `agents/reel_writer.py` (`generate_hooks`/`generate_reel` temp 0.8, `parse_hooks` реэкспорт из post_writer), `utils/formatter.py` (`format_reel` §9.2 — заголовки блоков ━━━, метки 🎙/📺/🎬 жирным, экранирование тела, ПОДПИСЬ/ХЭШТЕГИ, fallback), `ReelFlow` (waiting_topic→choosing_hook→viewing_reel + `duration`), клавиатуры `reel_hooks_keyboard`/`reel_actions_keyboard`/`reel_length_keyboard`, колбэки потока Reels в `callbacks.py` (menu:reel, reel_hook:*, reel:rewrite/another_hook/length/len:15-30-60/back/save), `handle_reel_request` в message.py (+ обработчик ReelFlow.waiting_topic), `menu:reel` убран из заглушек start.py. Префикс `reel_hook:`/`reel:` исключает конфликт с потоком поста. Сохранение в drafts+publications (type=reel). Smoke 25/25, py_compile OK. |

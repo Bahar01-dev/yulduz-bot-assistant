@@ -46,9 +46,11 @@ class Config:
     TELEGRAM_BOT_TOKEN: str
     ANTHROPIC_API_KEY: str
     GROQ_API_KEY: str | None
+    TAVILY_API_KEY: str | None
     OWNER_TELEGRAM_ID: int
     DATABASE_PATH: str
     VOICE_ENABLED: bool
+    TRENDS_ENABLED: bool
     # LLM-провайдер: если LLM_BASE_URL задан — используем OpenAI-совместимый
     # шлюз (например OpenRouter); иначе — прямой Anthropic API.
     LLM_BASE_URL: str | None
@@ -67,6 +69,10 @@ def _load_config() -> Config:
     groq_key = os.getenv("GROQ_API_KEY") or None
     voice_enabled = bool(groq_key)
 
+    # TAVILY опционален: включает анализ трендов/конкурентов (V2)
+    tavily_key = os.getenv("TAVILY_API_KEY") or None
+    trends_enabled = bool(tavily_key)
+
     # Путь к БД: по умолчанию локально data/bot.db
     database_path = os.getenv("DATABASE_PATH", "data/bot.db")
 
@@ -81,9 +87,11 @@ def _load_config() -> Config:
         TELEGRAM_BOT_TOKEN=telegram_token,
         ANTHROPIC_API_KEY=anthropic_key,
         GROQ_API_KEY=groq_key,
+        TAVILY_API_KEY=tavily_key,
         OWNER_TELEGRAM_ID=owner_id,
         DATABASE_PATH=database_path,
         VOICE_ENABLED=voice_enabled,
+        TRENDS_ENABLED=trends_enabled,
         LLM_BASE_URL=llm_base_url,
         LLM_MODEL=llm_model,
     )

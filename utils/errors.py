@@ -86,6 +86,17 @@ except ImportError:  # pragma: no cover - зависит от окружения
 # лучшее качество для русского. Переопределяется env WHISPER_MODEL при желании.
 WHISPER_MODEL = os.getenv("WHISPER_MODEL") or "whisper-large-v3"
 
+# Tavily SDK — для веб-поиска трендов/конкурентов (V2). Импорт защищён так же,
+# как остальные SDK: если пакета нет, _TAVILY_AVAILABLE=False, а safe_search
+# вернёт ситуацию SEARCH_ERROR при попытке вызова.
+try:
+    from tavily import AsyncTavilyClient  # type: ignore
+
+    _TAVILY_AVAILABLE = True
+except ImportError:  # pragma: no cover - зависит от окружения
+    AsyncTavilyClient = None  # type: ignore
+    _TAVILY_AVAILABLE = False
+
 
 def _exc(name: str) -> tuple[type[BaseException], ...]:
     """Классы исключений с данным именем из обоих SDK (anthropic и openai).
@@ -141,6 +152,7 @@ class Situation(str, Enum):
     EMPTY_RESPONSE = "empty_response"        # Пустой/нечитаемый ответ модели
     CONTENT_FILTER = "content_filter"        # Модель отказалась / контент-фильтр
     GROQ_ERROR = "groq_error"                # Ошибка Groq Whisper (голос)
+    SEARCH_ERROR = "search_error"            # Ошибка веб-поиска Tavily (тренды, V2)
     DB_ERROR = "db_error"                    # Ошибка записи в БД
     UNKNOWN = "unknown_error"                # Любая прочая ошибка (catch-all)
 
@@ -226,6 +238,13 @@ ERROR_CATALOG: dict[Situation, ErrorPolicy] = {
     # Ошибка Groq Whisper (голос) | WARNING | нет | ×1
     Situation.GROQ_ERROR: ErrorPolicy(
         user_message="Голосовой ввод временно недоступен. Напиши текстом, пожалуйста 🙏",
+        log_level=logging.WARNING,
+        alert_owner=False,
+        retries=1,
+    ),
+    # Ошибка веб-поиска Tavily (тренды, V2) | WARNING | нет | ×1
+    Situation.SEARCH_ERROR: ErrorPolicy(
+        user_message="Не удалось собрать тренды сейчас. Попробуй чуть позже 🙏",
         log_level=logging.WARNING,
         alert_owner=False,
         retries=1,
@@ -638,6 +657,86 @@ async def safe_transcribe(
             return GenerationResult.success(text.strip())
 
         except Exception as exc:  # любая ошибка Groq → GROQ_ERROR (+ ретрай по политике)
+            _log_situation(situation, exc, attempt=attempt)
+            if attempt < retries:
+                await _sleep_backoff(attempt)
+                attempt += 1
+                continue
+            return GenerationResult.failure(situation)
+
+
+# ---------------------------------------------------------------------------
+# Веб-поиск трендов/конкурентов через Tavily (V2)
+# ---------------------------------------------------------------------------
+def _format_search_results(response: Any) -> str | None:
+    """Сворачивает ответ Tavily в компактный текст для подачи в LLM.
+
+    Tavily search() возвращает dict с ключами 'answer' (сводка) и 'results'
+    (список {title, url, content}). Собираем читаемый блок; None — если данных нет
+    (трактуется как SEARCH_ERROR → «попробуй позже»).
+    """
+    if not isinstance(response, dict):
+        return None
+    parts: list[str] = []
+    answer = (response.get("answer") or "").strip()
+    if answer:
+        parts.append(f"Сводка поиска: {answer}")
+    results = response.get("results") or []
+    for i, item in enumerate(results, start=1):
+        if not isinstance(item, dict):
+            continue
+        title = (item.get("title") or "").strip()
+        content = (item.get("content") or "").strip()
+        if not title and not content:
+            continue
+        parts.append(f"{i}. {title}\n{content}")
+    text = "\n\n".join(parts).strip()
+    return text or None
+
+
+async def safe_search(*, query: str, max_results: int = 6) -> GenerationResult:
+    """Безопасная обёртка веб-поиска (Tavily) для анализа трендов (V2).
+
+    Зеркалит safe_transcribe/safe_generate: ловит ЛЮБУЮ ошибку, логирует детали,
+    ретраит по политике каталога (SEARCH_ERROR ×1) и возвращает GenerationResult —
+    ok=True с .text (свёрнутые результаты поиска) при успехе, иначе ok=False с
+    готовым RU-сообщением (пользователь видит «попробуй позже», не тех.текст).
+
+    Ключ/SDK отсутствует → сразу дружелюбное RU-сообщение SEARCH_ERROR.
+    """
+    situation = Situation.SEARCH_ERROR
+    retries = get_policy(situation).retries
+
+    if not config.TAVILY_API_KEY or not _TAVILY_AVAILABLE:
+        logger.warning(
+            "Веб-поиск недоступен: TAVILY_API_KEY=%s, SDK=%s",
+            bool(config.TAVILY_API_KEY),
+            _TAVILY_AVAILABLE,
+        )
+        return GenerationResult.failure(situation)
+
+    client = AsyncTavilyClient(api_key=config.TAVILY_API_KEY)
+
+    attempt = 0
+    while True:
+        try:
+            response = await client.search(
+                query=query,
+                max_results=max_results,
+                include_answer=True,
+                search_depth="advanced",
+            )
+            text = _format_search_results(response)
+            if not text:
+                logger.warning("Пустой результат поиска Tavily (попытка %d).", attempt + 1)
+                if attempt < retries:
+                    await _sleep_backoff(attempt)
+                    attempt += 1
+                    continue
+                return GenerationResult.failure(situation)
+            return GenerationResult.success(text)
+
+        except Exception as exc:  # любая ошибка Tavily → SEARCH_ERROR (+ ретрай по политике)
             _log_situation(situation, exc, attempt=attempt)
             if attempt < retries:
                 await _sleep_backoff(attempt)

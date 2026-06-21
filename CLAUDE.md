@@ -24,29 +24,38 @@ Telegram-бот — персональный ИИ-агент для создан
 │   ├── orchestrator.py         ← роутинг запросов по intent
 │   ├── post_writer.py          ← агент написания постов
 │   ├── reel_writer.py          ← агент сценариев Reels
+│   ├── planner.py              ← агент контент-плана (V2)
+│   ├── trend_analyst.py        ← агент трендов/конкурентов, Tavily (V2)
 │   └── onboarding.py           ← первичная настройка стиля
 │
 ├── /handlers
 │   ├── start.py                ← /start, запуск онбординга
 │   ├── message.py              ← свободный текст → роутер
 │   ├── menu.py                 ← /menu, черновики, профиль (Фаза 8)
+│   ├── plan.py                 ← /план, контент-план (V2)
+│   ├── trends.py               ← /тренды, анализ трендов (V2)
 │   ├── voice.py                ← Groq Whisper STT
-│   └── callbacks.py            ← inline-кнопки (потоки поста/Reels)
+│   └── callbacks.py            ← inline-кнопки (потоки поста/Reels + 👍/👎 обучение стилю)
 │
 ├── /database
 │   ├── db.py                   ← инициализация SQLite
 │   ├── brand_profile.py        ← CRUD профиля бренда
 │   ├── publications.py         ← CRUD истории публикаций
-│   └── drafts.py               ← CRUD черновиков
+│   ├── drafts.py               ← CRUD черновиков
+│   └── style_feedback.py       ← CRUD оценок стиля 👍/👎 (V2, §13.3)
 │
 ├── /prompts
 │   ├── post_prompt.py          ← шаблон системного промпта для постов
 │   ├── reel_prompt.py          ← шаблон системного промпта для Reels
-│   └── style_builder.py        ← собирает стиль из профиля БД
+│   ├── plan_prompt.py          ← шаблон промпта контент-плана (V2)
+│   ├── trend_prompt.py         ← шаблон промпта трендов (V2)
+│   └── style_builder.py        ← собирает стиль из профиля БД (+ примеры из style_feedback)
 │
 └── /utils
-    ├── formatter.py            ← Markdown-форматирование для Telegram
+    ├── formatter.py            ← Markdown-форматирование (пост/Reels/план/тренды)
     ├── keyboards.py            ← inline-клавиатуры
+    ├── errors.py               ← safe_generate/safe_transcribe/safe_search + каталог ошибок
+    ├── logger.py               ← логирование в stdout
     └── state.py                ← aiogram FSM состояния диалога
 ```
 
@@ -61,7 +70,7 @@ Telegram-бот — персональный ИИ-агент для создан
 | LLM | Claude claude-opus-4-8 (Anthropic) | 0.109.2 |
 | База данных | SQLite (aiosqlite) | 0.20.0 |
 | Голос → текст | Groq Whisper (whisper-large-v3) | groq 1.4.0 |
-| Веб-поиск (V2) | Tavily API | — |
+| Веб-поиск (V2, тренды) | Tavily API | tavily-python 0.5.0 |
 | Хостинг | Railway.app | — |
 
 ---
@@ -185,7 +194,8 @@ TELEGRAM_BOT_TOKEN=       # @BotFather
 ANTHROPIC_API_KEY=        # ключ провайдера: Anthropic (sk-ant-…) ИЛИ OpenRouter (sk-or-…)
 LLM_BASE_URL=             # пусто → Anthropic; OpenRouter: https://openrouter.ai/api/v1
 LLM_MODEL=                # пусто → дефолт; OpenRouter: anthropic/claude-opus-4
-GROQ_API_KEY=             # console.groq.com (бесплатно)
+GROQ_API_KEY=             # console.groq.com (бесплатно) — голос, опционально
+TAVILY_API_KEY=           # app.tavily.com (бесплатно) — тренды V2, опционально
 OWNER_TELEGRAM_ID=        # @userinfobot
 DATABASE_PATH=/app/data/bot.db
 ```
@@ -193,6 +203,10 @@ DATABASE_PATH=/app/data/bot.db
 **LLM-провайдер:** слой генерации (`utils/errors.py`) поддерживает два пути — прямой
 Anthropic SDK или OpenAI-совместимый шлюз (OpenRouter) при заданном `LLM_BASE_URL`.
 Ключ в обоих случаях кладётся в `ANTHROPIC_API_KEY`.
+
+**Опциональные ключи-гейты:** без `GROQ_API_KEY` выключен голос (`VOICE_ENABLED`),
+без `TAVILY_API_KEY` выключены тренды (`TRENDS_ENABLED`) — раздел показывает подсказку
+«добавь ключ». Обучение стилю и контент-план (V2) работают на одном `ANTHROPIC_API_KEY`.
 
 ---
 
@@ -220,7 +234,9 @@ Anthropic SDK или OpenAI-совместимый шлюз (OpenRouter) при 
 
 | Продукт | Статус |
 |---|---|
-| Bot V1 (MVP) | 📋 Спека готова, разработка не начата |
-| Bot V2 (тренды, план, стиль) | ⏳ После MVP |
+| Bot V1 (MVP) | ✅ Реализован (Фазы 0–9); деплой на Railway — действие владельца |
+| Bot V2 (обучение стилю, контент-план, тренды) | ✅ Реализован (Фаза 11); тренды требуют `TAVILY_API_KEY` |
+| Bot V3 (ответы подписчикам, репурпозинг, аналитика) | ⏳ После V2 |
 
-**Следующий шаг:** `"Начни разработку по спеке spec.md"`
+**Следующий шаг:** живой смоук на Railway по чеклисту (Plan.md Фаза 10/11);
+для трендов — добавить `TAVILY_API_KEY` в переменные окружения Railway.

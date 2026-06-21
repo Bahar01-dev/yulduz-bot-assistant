@@ -76,10 +76,12 @@ def post_actions_keyboard() -> InlineKeyboardMarkup:
     Раскладка:
       [🔄 Переписать]  [💡 Другой вариант]
       [🪝 Другой хук]  [💾 Сохранить]
+      [👍 Одобрить]    [👎 Отклонить]
       [🏠 В меню]
 
     callback_data согласованы с handlers/callbacks.py:
-      post:rewrite / post:another / post:another_hook / post:save / menu
+      post:rewrite / post:another / post:another_hook / post:save /
+      post:approve / post:reject (V2 §13.3, обучение стилю) / menu
     """
     keyboard = [
         [
@@ -89,6 +91,10 @@ def post_actions_keyboard() -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(text="🪝 Другой хук", callback_data="post:another_hook"),
             InlineKeyboardButton(text="💾 Сохранить", callback_data="post:save"),
+        ],
+        [
+            InlineKeyboardButton(text="👍 Одобрить", callback_data="post:approve"),
+            InlineKeyboardButton(text="👎 Отклонить", callback_data="post:reject"),
         ],
         [
             InlineKeyboardButton(text="🏠 В меню", callback_data="menu"),
@@ -116,10 +122,12 @@ def reel_actions_keyboard() -> InlineKeyboardMarkup:
     Раскладка:
       [🔄 Переписать]   [🪝 Другой хук]
       [📐 Изменить длину] [💾 Сохранить]
+      [👍 Одобрить]     [👎 Отклонить]
       [🏠 В меню]
 
     callback_data согласованы с handlers/callbacks.py:
-      reel:rewrite / reel:another_hook / reel:length / reel:save / menu
+      reel:rewrite / reel:another_hook / reel:length / reel:save /
+      reel:approve / reel:reject (V2 §13.3, обучение стилю) / menu
     """
     keyboard = [
         [
@@ -129,6 +137,10 @@ def reel_actions_keyboard() -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(text="📐 Изменить длину", callback_data="reel:length"),
             InlineKeyboardButton(text="💾 Сохранить", callback_data="reel:save"),
+        ],
+        [
+            InlineKeyboardButton(text="👍 Одобрить", callback_data="reel:approve"),
+            InlineKeyboardButton(text="👎 Отклонить", callback_data="reel:reject"),
         ],
         [
             InlineKeyboardButton(text="🏠 В меню", callback_data="menu"),
@@ -205,19 +217,61 @@ def profile_fields_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def plan_period_keyboard() -> InlineKeyboardMarkup:
+    """Выбор периода контент-плана (V2): Неделя / Месяц + В меню.
+
+    callback_data: plan:period:week / plan:period:month / menu.
+    """
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🗓 Неделя", callback_data="plan:period:week")
+    builder.button(text="📅 Месяц", callback_data="plan:period:month")
+    builder.button(text="🏠 В меню", callback_data="menu")
+    builder.adjust(2, 1)
+    return builder.as_markup()
+
+
+def plan_actions_keyboard() -> InlineKeyboardMarkup:
+    """Кнопки под готовым контент-планом (V2): другой план / в меню.
+
+    callback_data: plan:another / menu.
+    """
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔄 Другой план", callback_data="plan:another")
+    builder.button(text="🏠 В меню", callback_data="menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def trend_actions_keyboard() -> InlineKeyboardMarkup:
+    """Кнопки под разбором трендов (V2): обновить / в меню.
+
+    callback_data: trend:refresh / menu.
+    """
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔄 Обновить", callback_data="trend:refresh")
+    builder.button(text="🏠 В меню", callback_data="menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def main_menu_keyboard() -> InlineKeyboardMarkup:
-    """Главное меню (spec.md §10).
+    """Главное меню (spec.md §10 + V2-пункты «Контент-план» и «Тренды»).
 
     Раскладка:
       [✍️ Написать пост]  [🎬 Сценарий Reels]
+      [🗓 Контент-план]   [📈 Тренды]
       [💾 Черновики]      [⚙️ Изменить профиль]
 
-    Используется после онбординга и в Фазах 6/8.
+    Используется после онбординга и в Фазах 6/8 + V2.
     """
     keyboard = [
         [
             InlineKeyboardButton(text="✍️ Написать пост", callback_data="menu:post"),
             InlineKeyboardButton(text="🎬 Сценарий Reels", callback_data="menu:reel"),
+        ],
+        [
+            InlineKeyboardButton(text="🗓 Контент-план", callback_data="menu:plan"),
+            InlineKeyboardButton(text="📈 Тренды", callback_data="menu:trend"),
         ],
         [
             InlineKeyboardButton(text="💾 Черновики", callback_data="menu:drafts"),

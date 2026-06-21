@@ -42,17 +42,20 @@ async def generate_hooks(
     recent_topics: list[str],
     topic: str,
     bot=None,
+    style_examples: dict | None = None,
 ) -> GenerationResult:
     """ШАГ 1: генерирует 3 варианта хука (первые 3 секунды) по теме Reels.
 
     Собирает system = профиль + история + hooks_instruction(topic); тему кладёт
     в user-сообщение. Возвращает GenerationResult; при успехе в .text — сырой
     ответ с тремя строками HOOK_1/2/3 (парсится через parse_hooks()).
+    style_examples (V2, §13.3) — примеры одобренного/отклонённого стиля.
     """
     system = build_system_prompt(
         profile=profile,
         recent_topics=recent_topics,
         format_instructions=hooks_instruction(topic),
+        style_examples=style_examples,
     )
     messages = [{"role": "user", "content": topic}]
     logger.info("reel.generate_hooks: тема=%r", topic)
@@ -72,6 +75,7 @@ async def generate_reel(
     duration_sec: int = DEFAULT_DURATION,
     bot=None,
     temperature: float = REEL_TEMPERATURE,
+    style_examples: dict | None = None,
 ) -> GenerationResult:
     """ШАГ 2: генерирует полный побитовый сценарий Reels по выбранному хуку.
 
@@ -82,6 +86,7 @@ async def generate_reel(
 
     duration_sec (15/30/60) задаёт число битов и тайминги; некорректное значение
     нормализуется внутри reel_format_instruction к DEFAULT_DURATION.
+    style_examples (V2, §13.3) — примеры одобренного/отклонённого стиля.
     """
     if duration_sec not in SUPPORTED_DURATIONS:
         duration_sec = DEFAULT_DURATION
@@ -89,6 +94,7 @@ async def generate_reel(
         profile=profile,
         recent_topics=recent_topics,
         format_instructions=reel_format_instruction(selected_hook, duration_sec),
+        style_examples=style_examples,
     )
     messages = [{"role": "user", "content": _REEL_USER_COMMAND}]
     logger.info(

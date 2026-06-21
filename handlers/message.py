@@ -19,7 +19,7 @@ from aiogram.types import Message
 
 from agents import post_writer, reel_writer
 from agents.orchestrator import CLARIFY_TEXT, detect_intent, extract_topic
-from database import brand_profile, publications
+from database import brand_profile, publications, style_feedback
 from handlers.callbacks import _render_hooks_message, send_typing
 from utils.keyboards import hooks_keyboard, main_menu_keyboard, reel_hooks_keyboard
 from utils.logger import get_logger
@@ -36,9 +36,6 @@ NO_PROFILE_TEXT = "Нужно сначала настроить профиль. 
 # Уточнение темы, если intent распознан, но тема пустая.
 ASK_POST_TOPIC = "О чём написать пост?"
 ASK_REEL_TOPIC = "О чём снять Reels?"
-
-# V2-интенты пока недоступны.
-V2_TEXT = "Это будет в следующей версии (V2)."
 
 
 # ───────────────────── Точки расширения для Фаз 6/7 ─────────────────────
@@ -59,9 +56,10 @@ async def handle_post_request(message: Message, topic: str, state: FSMContext) -
     user_id = message.from_user.id
     logger.info("handle_post_request: тема=%r", topic)
 
-    # Профиль + последние темы (для дедупликации, §13.2) — в системный промпт.
+    # Профиль + последние темы (дедуп §13.2) + примеры стиля (§13.3) — в системный промпт.
     profile = await brand_profile.get_by_user(user_id) or {}
     recent_topics = await publications.get_recent_topics(user_id, limit=20)
+    style_examples = await style_feedback.get_examples(user_id)
 
     await send_typing(message)
     result = await post_writer.generate_hooks(
@@ -69,6 +67,7 @@ async def handle_post_request(message: Message, topic: str, state: FSMContext) -
         recent_topics=recent_topics,
         topic=topic,
         bot=message.bot,
+        style_examples=style_examples,
     )
 
     # Ошибка генерации → дружелюбное RU-сообщение (+ алерт владельцу при необходимости)
@@ -107,6 +106,7 @@ async def handle_reel_request(message: Message, topic: str, state: FSMContext) -
 
     profile = await brand_profile.get_by_user(user_id) or {}
     recent_topics = await publications.get_recent_topics(user_id, limit=20)
+    style_examples = await style_feedback.get_examples(user_id)
 
     await send_typing(message)
     result = await reel_writer.generate_hooks(
@@ -114,6 +114,7 @@ async def handle_reel_request(message: Message, topic: str, state: FSMContext) -
         recent_topics=recent_topics,
         topic=topic,
         bot=message.bot,
+        style_examples=style_examples,
     )
 
     if not result.ok:
@@ -203,8 +204,16 @@ async def route_text(message: Message, text: str, state: FSMContext) -> None:
         await handle_reel_request(message, topic, state)
         return
 
-    if intent in ("plan", "trend"):
-        await message.answer(V2_TEXT)
+    if intent == "plan":
+        from handlers.plan import start_plan_flow
+
+        await start_plan_flow(message, state, user_id)
+        return
+
+    if intent == "trend":
+        from handlers.trends import start_trend_flow
+
+        await start_trend_flow(message, state, user_id)
         return
 
     # unknown → вежливое уточнение (§6.1) + главное меню для удобства.

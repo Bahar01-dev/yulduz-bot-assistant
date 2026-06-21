@@ -15,7 +15,9 @@ from handlers import OwnerMiddleware
 from handlers import callbacks as callbacks_handlers
 from handlers import menu as menu_handlers
 from handlers import message as message_handlers
+from handlers import plan as plan_handlers
 from handlers import start as start_handlers
+from handlers import trends as trends_handlers
 from handlers import voice as voice_handlers
 from utils.errors import ERROR_CATALOG, Situation, alert_owner
 from utils.logger import setup_logging, get_logger, log_exception
@@ -86,6 +88,10 @@ async def main() -> None:
     # menu.router (Фаза 8: /menu, menu:drafts, menu:profile, draft:open:*,
     # profile:*) — ПОСЛЕ остальных. Его пункты не пересекаются с фильтрами выше.
     dp.include_router(menu_handlers.router)
+    # V2-роутеры: plan (/план, menu:plan, plan:*) и trends (/тренды, menu:trend,
+    # trend:*). Колбэки уникальны, конфликтов с фильтрами выше нет.
+    dp.include_router(plan_handlers.router)
+    dp.include_router(trends_handlers.router)
 
     # voice.router (Фаза 9: F.voice → Groq Whisper → поток поста/Reels).
     # Регистрируем только при включённом голосовом вводе (есть GROQ_API_KEY).

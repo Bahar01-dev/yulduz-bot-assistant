@@ -65,6 +65,32 @@ class ReelFlow(StatesGroup):
     viewing_reel = State()
 
 
+class PlanFlow(StatesGroup):
+    """Состояния контент-плана (V2, spec.md §18 «Контент-план»).
+
+    choosing_period — показан выбор периода (Неделя/Месяц), ждём кнопку;
+    viewing_plan    — показан готовый план, активны кнопки действий.
+
+    В FSM data во время потока храним:
+      period — выбранный период ('week' | 'month', str).
+    """
+
+    choosing_period = State()
+    viewing_plan = State()
+
+
+class TrendFlow(StatesGroup):
+    """Состояния анализа трендов/конкурентов (V2, spec.md §18 «Тренды»).
+
+    viewing_trends — показан разбор трендов, активны кнопки действий.
+
+    В FSM data во время потока храним:
+      query — поисковый запрос/тема, по которой собирали тренды (str).
+    """
+
+    viewing_trends = State()
+
+
 class ProfileEdit(StatesGroup):
     """Состояния редактирования профиля (Фаза 8, spec.md §10).
 

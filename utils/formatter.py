@@ -31,6 +31,8 @@ from __future__ import annotations
 
 import re
 
+from prompts.plan_prompt import PLAN_MARKER, period_title
+from prompts.trend_prompt import TREND_MARKER
 from prompts.post_prompt import (
     CHECKLIST_MARKER,
     CTA_MARKER,
@@ -159,6 +161,54 @@ def format_post(raw: str) -> str:
         blocks.append(_escape_md(checklist))
 
     return "\n".join(blocks).strip()
+
+
+# ───────────────────────── Контент-план (V2, §18) ─────────────────────────
+
+
+def format_plan(raw: str, period: str = "week") -> str:
+    """Собирает красивый Telegram-Markdown контент-план из сырого ответа модели.
+
+    Срезает маркер PLAN_MARKER (если есть), экранирует тело и добавляет заголовок
+    «🗓 КОНТЕНТ-ПЛАН на <период>». При пустом вводе — пустая строка; маркера может
+    не быть — тогда форматируем весь ответ как тело (ничего не теряем).
+    """
+    if not raw or not raw.strip():
+        return ""
+
+    body = raw.strip()
+    # Срезаем всё до маркера ПЛАН: включительно, если модель его поставила.
+    idx = body.find(PLAN_MARKER)
+    if idx != -1:
+        body = body[idx + len(PLAN_MARKER):].strip()
+
+    header = f"🗓 *КОНТЕНТ-ПЛАН на {period_title(period)}*"
+    if not body:
+        return header
+    return f"{header}\n\n{_escape_md(body)}"
+
+
+# ───────────────────────── Тренды (V2, §18) ─────────────────────────
+
+
+def format_trends(raw: str) -> str:
+    """Собирает Telegram-Markdown разбор трендов из сырого ответа модели.
+
+    Срезает маркер TREND_MARKER (если есть), экранирует тело и добавляет
+    заголовок «📈 ТРЕНДЫ». При пустом вводе — пустая строка.
+    """
+    if not raw or not raw.strip():
+        return ""
+
+    body = raw.strip()
+    idx = body.find(TREND_MARKER)
+    if idx != -1:
+        body = body[idx + len(TREND_MARKER):].strip()
+
+    header = "📈 *ТРЕНДЫ И ИДЕИ*"
+    if not body:
+        return header
+    return f"{header}\n\n{_escape_md(body)}"
 
 
 # ───────────────────────── Reels (Фаза 7, §9.2) ─────────────────────────

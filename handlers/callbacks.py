@@ -27,7 +27,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
 from agents import post_writer, reel_writer
-from database import drafts, publications
+from database import drafts, publications, style_feedback
 from prompts.post_prompt import POST_TEMPERATURE
 from prompts.reel_prompt import DEFAULT_DURATION, REEL_TEMPERATURE, SUPPORTED_DURATIONS
 from utils.errors import GenerationResult, alert_owner
@@ -119,8 +119,8 @@ async def _generate_and_show_post(
 
     selected_hook = hooks[selected]
 
-    # Профиль и история тем нужны в каждом системном промпте (§13.1/§13.2).
-    profile, recent_topics = await _load_profile_and_topics(callback.from_user.id)
+    # Профиль, история тем и примеры стиля — в каждый системный промпт (§13.1/§13.2/§13.3).
+    profile, recent_topics, style_examples = await _load_profile_and_topics(callback.from_user.id)
 
     await send_typing(callback)
     result = await post_writer.generate_post(
@@ -130,6 +130,7 @@ async def _generate_and_show_post(
         selected_hook=selected_hook,
         bot=callback.bot,
         temperature=temperature,
+        style_examples=style_examples,
     )
 
     if not result.ok:
@@ -145,12 +146,17 @@ async def _generate_and_show_post(
 
 
 async def _load_profile_and_topics(user_id: int):
-    """Загружает профиль бренда и последние темы (для system-промпта)."""
-    from database import brand_profile  # локальный импорт во избежание циклов
+    """Загружает профиль, последние темы и примеры стиля (для system-промпта).
+
+    Примеры стиля (V2, §13.3) — одобренный/отклонённый контент из style_feedback;
+    подмешиваются в системный промпт, чтобы бот точнее попадал в голос владельца.
+    """
+    from database import brand_profile, style_feedback  # локальный импорт во избежание циклов
 
     profile = await brand_profile.get_by_user(user_id) or {}
     recent_topics = await publications.get_recent_topics(user_id, limit=20)
-    return profile, recent_topics
+    style_examples = await style_feedback.get_examples(user_id)
+    return profile, recent_topics, style_examples
 
 
 # ───────────────────── Запуск потока поста (menu:post) ─────────────────────
@@ -275,6 +281,64 @@ async def on_post_save(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.answer("Сохранено ✓")
 
 
+# ───────────────────── Обучение стилю: 👍/👎 (V2, spec.md §13.3) ─────────────────────
+
+# Тексты подтверждения оценки.
+_APPROVED_ACK = "Запомнил — буду писать в таком стиле 👍"
+_REJECTED_ACK = "Понял — буду избегать такого 👎"
+
+
+async def _save_style_feedback(
+    callback: CallbackQuery,
+    state: FSMContext,
+    *,
+    data_key: str,
+    verdict: str,
+) -> None:
+    """Сохраняет последний показанный контент в style_feedback с вердиктом.
+
+    data_key — ключ FSM data с сырым текстом (last_post_text / last_reel_text).
+    Накопленные примеры подмешиваются в будущие промпты (build_system_prompt).
+    Ошибку БД мапим в дружелюбный ответ (оценка не критична для потока).
+    """
+    data = await state.get_data()
+    content: str = data.get(data_key, "")
+    if not content:
+        await callback.answer(SESSION_LOST, show_alert=True)
+        return
+
+    try:
+        await style_feedback.save(
+            user_telegram_id=callback.from_user.id,
+            content_snippet=content,
+            verdict=verdict,
+        )
+    except Exception:
+        logger.exception("Ошибка сохранения оценки стиля (user=%s)", callback.from_user.id)
+        await callback.answer("Не получилось сохранить оценку. Попробуй ещё раз.", show_alert=True)
+        await alert_owner(callback.bot, "Ошибка сохранения style_feedback в БД.")
+        return
+
+    ack = _APPROVED_ACK if verdict == style_feedback.APPROVED else _REJECTED_ACK
+    await callback.answer(ack)
+
+
+@router.callback_query(PostFlow.viewing_post, F.data == "post:approve")
+async def on_post_approve(callback: CallbackQuery, state: FSMContext) -> None:
+    """👍 Одобрить пост → сохранить как пример хорошего стиля (§13.3)."""
+    await _save_style_feedback(
+        callback, state, data_key="last_post_text", verdict=style_feedback.APPROVED
+    )
+
+
+@router.callback_query(PostFlow.viewing_post, F.data == "post:reject")
+async def on_post_reject(callback: CallbackQuery, state: FSMContext) -> None:
+    """👎 Отклонить пост → сохранить как пример плохого стиля (§13.3)."""
+    await _save_style_feedback(
+        callback, state, data_key="last_post_text", verdict=style_feedback.REJECTED
+    )
+
+
 # ═════════════════════ Поток сценария Reels (Фаза 7, spec.md §7.3) ═════════════════════
 
 # Тексты приглашения/потери сессии для потока Reels.
@@ -317,7 +381,7 @@ async def _generate_and_show_reel(
         return
 
     selected_hook = hooks[selected]
-    profile, recent_topics = await _load_profile_and_topics(callback.from_user.id)
+    profile, recent_topics, style_examples = await _load_profile_and_topics(callback.from_user.id)
 
     await send_typing(callback)
     result = await reel_writer.generate_reel(
@@ -328,6 +392,7 @@ async def _generate_and_show_reel(
         duration_sec=duration,
         bot=callback.bot,
         temperature=temperature,
+        style_examples=style_examples,
     )
 
     if not result.ok:
@@ -485,6 +550,22 @@ async def on_reel_save(callback: CallbackQuery, state: FSMContext) -> None:
 
     await callback.answer("Сохранено ✓")
     await callback.message.answer("Сохранено ✓")
+
+
+@router.callback_query(ReelFlow.viewing_reel, F.data == "reel:approve")
+async def on_reel_approve(callback: CallbackQuery, state: FSMContext) -> None:
+    """👍 Одобрить сценарий → сохранить как пример хорошего стиля (§13.3)."""
+    await _save_style_feedback(
+        callback, state, data_key="last_reel_text", verdict=style_feedback.APPROVED
+    )
+
+
+@router.callback_query(ReelFlow.viewing_reel, F.data == "reel:reject")
+async def on_reel_reject(callback: CallbackQuery, state: FSMContext) -> None:
+    """👎 Отклонить сценарий → сохранить как пример плохого стиля (§13.3)."""
+    await _save_style_feedback(
+        callback, state, data_key="last_reel_text", verdict=style_feedback.REJECTED
+    )
 
 
 # ───────────────────── В меню (menu / menu:main) ─────────────────────
