@@ -41,6 +41,7 @@ from utils.keyboards import (
     reel_length_keyboard,
 )
 from utils.logger import get_logger
+from utils.progress import Progress
 from utils.state import PostFlow, ReelFlow
 
 logger = get_logger(__name__)
@@ -56,6 +57,10 @@ MENU_PROMPT = "Чем займёмся?"
 
 # Сообщение об устаревшей/потерянной сессии (нажали кнопку после рестарта и т.п.).
 SESSION_LOST = "Сессия устарела. Напиши тему поста заново 🙏"
+
+# Статус-сообщения на время генерации (заменяются готовым результатом).
+WRITING_POST = "✍️ Пишу пост… это займёт 10–20 секунд"
+WRITING_REEL = "🎬 Пишу сценарий… это займёт 10–20 секунд"
 
 # Повышенная температура для кнопки «💡 Другой вариант» (больше вариативности).
 _ANOTHER_TEMPERATURE = min(POST_TEMPERATURE + 0.2, 1.0)
@@ -79,18 +84,16 @@ async def send_typing(callback_or_message) -> None:
         logger.debug("Не удалось отправить chat_action typing", exc_info=True)
 
 
-async def _handle_failure(callback: CallbackQuery, result: GenerationResult) -> None:
-    """Единая обработка неуспешной генерации (§6.8): RU-сообщение + алерт владельцу.
+async def _alert_owner_on_failure(
+    callback: CallbackQuery, result: GenerationResult, *, label: str
+) -> None:
+    """Короткий алерт владельцу при неуспешной генерации (§6.8), если каталог требует.
 
-    Пользователю показываем только result.user_message (никакого тех.текста).
-    Если каталог требует — шлём короткий алерт владельцу.
+    Пользователю текст ошибки показывает прогресс-статус (progress.fail); здесь —
+    только уведомление владельцу. label — что генерировали («поста»/«Reels»).
     """
-    await callback.message.answer(result.user_message)
     if result.alert_owner:
-        await alert_owner(
-            callback.bot,
-            f"Сбой генерации поста [{result.situation}].",
-        )
+        await alert_owner(callback.bot, f"Сбой генерации {label} [{result.situation}].")
 
 
 async def _generate_and_show_post(
@@ -122,7 +125,8 @@ async def _generate_and_show_post(
     # Профиль, история тем и примеры стиля — в каждый системный промпт (§13.1/§13.2/§13.3).
     profile, recent_topics, style_examples = await _load_profile_and_topics(callback.from_user.id)
 
-    await send_typing(callback)
+    # Статус-сообщение на время генерации — заменится готовым постом (или ошибкой).
+    progress = await Progress.begin(callback.message, WRITING_POST)
     result = await post_writer.generate_post(
         profile=profile,
         recent_topics=recent_topics,
@@ -134,7 +138,8 @@ async def _generate_and_show_post(
     )
 
     if not result.ok:
-        await _handle_failure(callback, result)
+        await progress.fail(result.user_message)
+        await _alert_owner_on_failure(callback, result, label="поста")
         return
 
     # Сохраняем сырой ответ в сессию (для сохранения в БД и истории действий)
@@ -142,7 +147,7 @@ async def _generate_and_show_post(
     await state.set_state(PostFlow.viewing_post)
 
     pretty = format_post(result.text)
-    await callback.message.answer(pretty, reply_markup=post_actions_keyboard())
+    await progress.finish(pretty, reply_markup=post_actions_keyboard())
 
 
 async def _load_profile_and_topics(user_id: int):
@@ -346,16 +351,6 @@ ASK_REEL_TOPIC = "О чём снять Reels?"
 SESSION_LOST_REEL = "Сессия устарела. Напиши тему Reels заново 🙏"
 
 
-async def _handle_failure_reel(callback: CallbackQuery, result: GenerationResult) -> None:
-    """Обработка неуспешной генерации Reels (§6.8): RU-сообщение + алерт владельцу."""
-    await callback.message.answer(result.user_message)
-    if result.alert_owner:
-        await alert_owner(
-            callback.bot,
-            f"Сбой генерации Reels [{result.situation}].",
-        )
-
-
 async def _generate_and_show_reel(
     callback: CallbackQuery,
     state: FSMContext,
@@ -383,7 +378,8 @@ async def _generate_and_show_reel(
     selected_hook = hooks[selected]
     profile, recent_topics, style_examples = await _load_profile_and_topics(callback.from_user.id)
 
-    await send_typing(callback)
+    # Статус-сообщение на время генерации — заменится готовым сценарием (или ошибкой).
+    progress = await Progress.begin(callback.message, WRITING_REEL)
     result = await reel_writer.generate_reel(
         profile=profile,
         recent_topics=recent_topics,
@@ -396,14 +392,15 @@ async def _generate_and_show_reel(
     )
 
     if not result.ok:
-        await _handle_failure_reel(callback, result)
+        await progress.fail(result.user_message)
+        await _alert_owner_on_failure(callback, result, label="Reels")
         return
 
     await state.update_data(last_reel_text=result.text)
     await state.set_state(ReelFlow.viewing_reel)
 
     pretty = format_reel(result.text)
-    await callback.message.answer(pretty, reply_markup=reel_actions_keyboard())
+    await progress.finish(pretty, reply_markup=reel_actions_keyboard())
 
 
 @router.callback_query(F.data == "menu:reel")

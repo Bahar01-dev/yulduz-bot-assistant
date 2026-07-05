@@ -23,11 +23,11 @@ from aiogram.types import CallbackQuery, Message
 
 from agents import planner
 from database import brand_profile, publications, style_feedback
-from handlers.callbacks import send_typing
 from prompts.plan_prompt import DEFAULT_PERIOD, PERIODS
 from utils.formatter import format_plan
 from utils.keyboards import plan_actions_keyboard, plan_period_keyboard
 from utils.logger import get_logger
+from utils.progress import Progress
 from utils.state import PlanFlow
 
 logger = get_logger(__name__)
@@ -37,6 +37,7 @@ router = Router(name="plan")
 NO_PROFILE_TEXT = "Нужно сначала настроить профиль. Нажми /start"
 ASK_PERIOD_TEXT = "На какой период составить контент-план?"
 PLAN_FAILED = "Не получилось собрать план. Попробуй ещё раз 🙏"
+WRITING_PLAN = "🗓 Собираю контент-план… это займёт 10–20 секунд"
 
 
 async def start_plan_flow(message: Message, state: FSMContext, user_id: int) -> None:
@@ -65,7 +66,8 @@ async def _generate_and_show_plan(
     recent_topics = await publications.get_recent_topics(user_id, limit=20)
     style_examples = await style_feedback.get_examples(user_id)
 
-    await send_typing(message)
+    # Статус-сообщение на время генерации — заменится готовым планом (или ошибкой).
+    progress = await Progress.begin(message, WRITING_PLAN)
     result = await planner.generate_plan(
         profile=profile,
         recent_topics=recent_topics,
@@ -75,7 +77,7 @@ async def _generate_and_show_plan(
     )
 
     if not result.ok:
-        await message.answer(result.user_message)
+        await progress.fail(result.user_message)
         if result.alert_owner:
             from utils.errors import alert_owner
 
@@ -85,13 +87,13 @@ async def _generate_and_show_plan(
 
     pretty = format_plan(result.text, period)
     if not pretty:
-        await message.answer(PLAN_FAILED)
+        await progress.fail(PLAN_FAILED)
         await state.clear()
         return
 
     await state.update_data(period=period)
     await state.set_state(PlanFlow.viewing_plan)
-    await message.answer(pretty, reply_markup=plan_actions_keyboard())
+    await progress.finish(pretty, reply_markup=plan_actions_keyboard())
 
 
 # ───────────────────────── Точки входа ─────────────────────────

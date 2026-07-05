@@ -20,9 +20,10 @@ from aiogram.types import Message
 from agents import post_writer, reel_writer
 from agents.orchestrator import CLARIFY_TEXT, detect_intent, extract_topic
 from database import brand_profile, publications, style_feedback
-from handlers.callbacks import _render_hooks_message, send_typing
+from handlers.callbacks import _render_hooks_message
 from utils.keyboards import hooks_keyboard, main_menu_keyboard, reel_hooks_keyboard
 from utils.logger import get_logger
+from utils.progress import Progress
 from utils.state import PostFlow, ReelFlow
 
 logger = get_logger(__name__)
@@ -44,6 +45,10 @@ ASK_REEL_TOPIC = "О чём снять Reels?"
 # Сообщение, если модель не вернула достаточно хуков.
 _HOOKS_FAILED = "Не получилось придумать варианты. Попробуй переформулировать тему 🙏"
 
+# Статус-сообщения на время генерации хуков (заменяются вариантами или ошибкой).
+WRITING_POST_HOOKS = "✍️ Придумываю 3 варианта хука…"
+WRITING_REEL_HOOKS = "🎬 Придумываю 3 варианта хука…"
+
 
 async def handle_post_request(message: Message, topic: str, state: FSMContext) -> None:
     """ШАГ 1 потока поста (Фаза 6, §7.2): генерируем 3 хука по теме.
@@ -61,7 +66,8 @@ async def handle_post_request(message: Message, topic: str, state: FSMContext) -
     recent_topics = await publications.get_recent_topics(user_id, limit=20)
     style_examples = await style_feedback.get_examples(user_id)
 
-    await send_typing(message)
+    # Статус-сообщение на время генерации — заменится вариантами хука (или ошибкой).
+    progress = await Progress.begin(message, WRITING_POST_HOOKS)
     result = await post_writer.generate_hooks(
         profile=profile,
         recent_topics=recent_topics,
@@ -72,7 +78,7 @@ async def handle_post_request(message: Message, topic: str, state: FSMContext) -
 
     # Ошибка генерации → дружелюбное RU-сообщение (+ алерт владельцу при необходимости)
     if not result.ok:
-        await message.answer(result.user_message)
+        await progress.fail(result.user_message)
         if result.alert_owner:
             from utils.errors import alert_owner
 
@@ -83,14 +89,14 @@ async def handle_post_request(message: Message, topic: str, state: FSMContext) -
     hooks = post_writer.parse_hooks(result.text)
     if not hooks:
         # Совсем не распарсилось — просим переформулировать
-        await message.answer(_HOOKS_FAILED)
+        await progress.fail(_HOOKS_FAILED)
         await state.clear()
         return
 
     # Сохраняем сессию поста и переходим к выбору хука (свободный текст не реролит)
     await state.update_data(topic=topic, hooks=hooks)
     await state.set_state(PostFlow.choosing_hook)
-    await message.answer(_render_hooks_message(hooks), reply_markup=hooks_keyboard(hooks))
+    await progress.finish(_render_hooks_message(hooks), reply_markup=hooks_keyboard(hooks))
 
 
 async def handle_reel_request(message: Message, topic: str, state: FSMContext) -> None:
@@ -108,7 +114,8 @@ async def handle_reel_request(message: Message, topic: str, state: FSMContext) -
     recent_topics = await publications.get_recent_topics(user_id, limit=20)
     style_examples = await style_feedback.get_examples(user_id)
 
-    await send_typing(message)
+    # Статус-сообщение на время генерации — заменится вариантами хука (или ошибкой).
+    progress = await Progress.begin(message, WRITING_REEL_HOOKS)
     result = await reel_writer.generate_hooks(
         profile=profile,
         recent_topics=recent_topics,
@@ -118,7 +125,7 @@ async def handle_reel_request(message: Message, topic: str, state: FSMContext) -
     )
 
     if not result.ok:
-        await message.answer(result.user_message)
+        await progress.fail(result.user_message)
         if result.alert_owner:
             from utils.errors import alert_owner
 
@@ -128,14 +135,14 @@ async def handle_reel_request(message: Message, topic: str, state: FSMContext) -
 
     hooks = reel_writer.parse_hooks(result.text)
     if not hooks:
-        await message.answer(_HOOKS_FAILED)
+        await progress.fail(_HOOKS_FAILED)
         await state.clear()
         return
 
     # Сохраняем сессию Reels и переходим к выбору хука (свободный текст не реролит)
     await state.update_data(topic=topic, hooks=hooks)
     await state.set_state(ReelFlow.choosing_hook)
-    await message.answer(_render_hooks_message(hooks), reply_markup=reel_hooks_keyboard(hooks))
+    await progress.finish(_render_hooks_message(hooks), reply_markup=reel_hooks_keyboard(hooks))
 
 
 # ───────────────────── Тема поста после кнопки меню «✍️ Написать пост» ─────────────────────

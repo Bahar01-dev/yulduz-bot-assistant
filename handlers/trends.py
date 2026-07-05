@@ -24,10 +24,10 @@ from aiogram.types import CallbackQuery, Message
 from agents import trend_analyst
 from config import config
 from database import brand_profile
-from handlers.callbacks import send_typing
 from utils.formatter import format_trends
 from utils.keyboards import trend_actions_keyboard
 from utils.logger import get_logger
+from utils.progress import Progress
 from utils.state import TrendFlow
 
 logger = get_logger(__name__)
@@ -41,6 +41,7 @@ TRENDS_DISABLED_TEXT = (
     "в переменные окружения — после рестарта раздел заработает."
 )
 TRENDS_FAILED = "Не удалось собрать тренды сейчас. Попробуй чуть позже 🙏"
+TRENDS_WORKING = "🔎 Собираю тренды… это займёт несколько секунд"
 
 
 async def start_trend_flow(message: Message, state: FSMContext, user_id: int) -> None:
@@ -66,12 +67,12 @@ async def _generate_and_show_trends(
     """Собирает тренды и показывает разбор с кнопками действий."""
     profile = await brand_profile.get_by_user(user_id) or {}
 
-    await message.answer("Собираю тренды… это займёт несколько секунд 🔎")
-    await send_typing(message)
+    # Статус-сообщение на время сбора трендов — заменится готовым разбором (или ошибкой).
+    progress = await Progress.begin(message, TRENDS_WORKING)
     result = await trend_analyst.generate_trends(profile=profile, bot=message.bot)
 
     if not result.ok:
-        await message.answer(result.user_message)
+        await progress.fail(result.user_message)
         if result.alert_owner:
             from utils.errors import alert_owner
 
@@ -81,12 +82,12 @@ async def _generate_and_show_trends(
 
     pretty = format_trends(result.text)
     if not pretty:
-        await message.answer(TRENDS_FAILED)
+        await progress.fail(TRENDS_FAILED)
         await state.clear()
         return
 
     await state.set_state(TrendFlow.viewing_trends)
-    await message.answer(pretty, reply_markup=trend_actions_keyboard())
+    await progress.finish(pretty, reply_markup=trend_actions_keyboard())
 
 
 # ───────────────────────── Точки входа ─────────────────────────
