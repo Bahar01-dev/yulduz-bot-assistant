@@ -25,7 +25,7 @@ _SYSTEM_PROMPT_TEMPLATE = """\
 
 ИСТОРИЯ: Уже написаны посты на темы: {recent_topics_list}
 Избегай повторения этих тем и формулировок.
-{style_examples_block}
+{grounding_block}{style_examples_block}
 ПРАВИЛА ГЕНЕРАЦИИ:
 - Пиши как живой эксперт, не как ChatGPT
 - Никакого "В заключение", "Таким образом", "Безусловно"
@@ -78,6 +78,26 @@ def _clean(value, fallback: str) -> str:
     return text if text else fallback
 
 
+def _format_grounding(grounding) -> str:
+    """Собирает блок «СВЕЖИЕ ФАКТЫ ИЗ ИНТЕРНЕТА» для системного промпта (§13.4, V2.1).
+
+    grounding — сырые результаты веб-поиска (raw_search из safe_search) либо None.
+    Если задан — возвращает готовый блок (с ведущей и хвостовой пустой строкой) с
+    правилом «опирайся на факты, не выдумывай». Если None/пусто — пустая строка,
+    и промпт остаётся как в V2 (обратная совместимость).
+    """
+    text = _clean(grounding, "")
+    if not text:
+        return ""
+    return (
+        "\nСВЕЖИЕ ФАКТЫ ИЗ ИНТЕРНЕТА (на сегодня) — используй их как источник правды:\n"
+        f"{text}\n"
+        "Опирайся на эти факты: конкретные названия, цифры и события бери отсюда.\n"
+        "НЕ выдумывай того, чего здесь нет — если факта нет, пиши обобщённо, "
+        "без вымышленных цифр и дат.\n"
+    )
+
+
 def _format_style_examples(style_examples) -> str:
     """Собирает блок «Примеры стиля» для системного промпта (§13.3, V2).
 
@@ -123,6 +143,7 @@ def build_system_prompt(
     recent_topics: list[str] | None = None,
     format_instructions: str = "",
     style_examples: dict | None = None,
+    grounding: str | None = None,
 ) -> str:
     """Собирает полный системный промпт контент-агента.
 
@@ -136,6 +157,9 @@ def build_system_prompt(
         style_examples: dict {"approved": [...], "rejected": [...]} из
             style_feedback.get_examples() (V2, §13.3). None/пусто → секция
             примеров не добавляется (поведение V1 не меняется).
+        grounding: сырые результаты веб-поиска (raw_search) для «заземления»
+            поста на реальных фактах (V2.1, §13.4/§20). None/пусто → блок фактов
+            не добавляется (поведение V2 не меняется).
 
     Returns:
         Готовый системный промпт (str) на русском.
@@ -163,6 +187,7 @@ def build_system_prompt(
         forbidden_words=_clean(profile.get("forbidden_words"), _EMPTY_FORBIDDEN),
         style_description=style_description,
         recent_topics_list=_format_topics(recent_topics),
+        grounding_block=_format_grounding(grounding),
         style_examples_block=_format_style_examples(style_examples),
         format_instructions=format_instructions,
     )

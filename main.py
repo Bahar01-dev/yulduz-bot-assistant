@@ -21,6 +21,7 @@ from handlers import trends as trends_handlers
 from handlers import voice as voice_handlers
 from utils.errors import ERROR_CATALOG, Situation, alert_owner
 from utils.logger import setup_logging, get_logger, log_exception
+from utils.scheduler import start_scheduler
 
 
 async def main() -> None:
@@ -101,12 +102,18 @@ async def main() -> None:
     else:
         logger.info("Голосовой ввод выключен (GROQ_API_KEY не задан).")
 
+    # Планировщик утреннего трендового брифа (V2.1, §20). Стартует только при
+    # TRENDS_ENABLED; ссылку держим до остановки, чтобы задачу не собрал GC.
+    scheduler = start_scheduler(bot)
+
     # Сбрасываем накопленные апдейты и стартуем polling
     await bot.delete_webhook(drop_pending_updates=True)
     logger.info("Бот запущен. Ожидаю сообщения...")
     try:
         await dp.start_polling(bot)
     finally:
+        if scheduler is not None:
+            scheduler.shutdown(wait=False)
         await bot.session.close()
         logger.info("Бот остановлен.")
 

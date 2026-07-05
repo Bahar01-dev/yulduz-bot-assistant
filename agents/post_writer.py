@@ -41,6 +41,7 @@ async def generate_hooks(
     topic: str,
     bot=None,
     style_examples: dict | None = None,
+    grounding: str | None = None,
 ) -> GenerationResult:
     """ШАГ 1: генерирует 3 варианта хука по теме.
 
@@ -51,12 +52,15 @@ async def generate_hooks(
     Аргумент bot не используется внутри (alert владельцу шлёт вызывающий код по
     result.alert_owner), но оставлен в сигнатуре для единообразия потока.
     style_examples (V2, §13.3) — примеры одобренного/отклонённого стиля.
+    grounding (V2.1, §20) — сырые факты веб-поиска: хуки опираются на реальные
+    данные из трендового брифа, а не на выдумку. None → поведение как в V2.
     """
     system = build_system_prompt(
         profile=profile,
         recent_topics=recent_topics,
         format_instructions=hooks_instruction(topic),
         style_examples=style_examples,
+        grounding=grounding,
     )
     # Тема — в user-сообщении (профиль/формат — в system).
     messages = [{"role": "user", "content": topic}]
@@ -77,6 +81,7 @@ async def generate_post(
     bot=None,
     temperature: float = POST_TEMPERATURE,
     style_examples: dict | None = None,
+    grounding: str | None = None,
 ) -> GenerationResult:
     """ШАГ 2: генерирует полный пост по выбранному хуку.
 
@@ -86,12 +91,15 @@ async def generate_post(
 
     temperature можно поднять для кнопки «💡 Другой вариант» (больше вариативности).
     style_examples (V2, §13.3) — примеры одобренного/отклонённого стиля.
+    grounding (V2.1, §20) — сырые факты веб-поиска: пост опирается на реальные
+    данные из трендового брифа. None → поведение как в V2.
     """
     system = build_system_prompt(
         profile=profile,
         recent_topics=recent_topics,
         format_instructions=post_format_instruction(selected_hook),
         style_examples=style_examples,
+        grounding=grounding,
     )
     messages = [{"role": "user", "content": _POST_USER_COMMAND}]
     logger.info("generate_post: тема=%r, хук=%r, t=%.2f", topic, selected_hook, temperature)

@@ -32,7 +32,7 @@ from __future__ import annotations
 import re
 
 from prompts.plan_prompt import PLAN_MARKER, period_title
-from prompts.trend_prompt import TREND_MARKER
+from prompts.trend_prompt import BRIEF_MARKER, TOPIC_PREFIX, TREND_MARKER
 from prompts.post_prompt import (
     CHECKLIST_MARKER,
     CTA_MARKER,
@@ -209,6 +209,57 @@ def format_trends(raw: str) -> str:
     if not body:
         return header
     return f"{header}\n\n{_escape_md(body)}"
+
+
+# ─────────────────── Трендовый бриф по расписанию (V2.1, §20) ───────────────────
+
+
+def format_brief(raw: str) -> str:
+    """Собирает Telegram-Markdown утренний трендовый бриф из сырого ответа модели.
+
+    Срезает маркер BRIEF_MARKER (если есть); строки тем «ТЕМА_N: …» превращает в
+    нумерованный список «N. …» (кнопки под сообщением дублируют выбор), остальные
+    строки (тренды 🔥) экранирует как есть. Добавляет заголовок и подсказку. При
+    пустом вводе — пустая строка (вызывающий слой обработает как сбой).
+    """
+    if not raw or not raw.strip():
+        return ""
+
+    body = raw.strip()
+    idx = body.find(BRIEF_MARKER)
+    if idx != -1:
+        body = body[idx + len(BRIEF_MARKER):].strip()
+
+    prefix_lower = TOPIC_PREFIX.lower()
+    topic_no = 0
+    lines: list[str] = []
+    for line in body.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            lines.append("")
+            continue
+        if stripped.lower().startswith(prefix_lower):
+            topic_no += 1
+            if ":" in stripped:
+                value = stripped.split(":", 1)[1].strip()
+            else:
+                value = stripped[len(TOPIC_PREFIX):].lstrip("0123456789").strip()
+            lines.append(f"*{topic_no}.* {_escape_md(value)}")
+        else:
+            lines.append(_escape_md(stripped))
+
+    # Убираем хвостовые пустые строки
+    while lines and lines[-1] == "":
+        lines.pop()
+
+    header = "🌅 *ТРЕНДЫ ДНЯ*"
+    footer = "Нажми на тему ниже — соберу пост на реальных фактах из этого брифа."
+    parts = [header, ""]
+    parts.extend(lines)
+    if topic_no:
+        parts.append("")
+        parts.append(footer)
+    return "\n".join(parts).strip()
 
 
 # ───────────────────────── Reels (Фаза 7, §9.2) ─────────────────────────

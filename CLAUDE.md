@@ -42,7 +42,8 @@ Telegram-бот — персональный ИИ-агент для создан
 │   ├── brand_profile.py        ← CRUD профиля бренда
 │   ├── publications.py         ← CRUD истории публикаций
 │   ├── drafts.py               ← CRUD черновиков
-│   └── style_feedback.py       ← CRUD оценок стиля 👍/👎 (V2, §13.3)
+│   ├── style_feedback.py       ← CRUD оценок стиля 👍/👎 (V2, §13.3)
+│   └── trend_brief.py          ← кэш трендового брифа за день (V2.1, §20)
 │
 ├── /prompts
 │   ├── post_prompt.py          ← шаблон системного промпта для постов
@@ -52,10 +53,11 @@ Telegram-бот — персональный ИИ-агент для создан
 │   └── style_builder.py        ← собирает стиль из профиля БД (+ примеры из style_feedback)
 │
 └── /utils
-    ├── formatter.py            ← Markdown-форматирование (пост/Reels/план/тренды)
+    ├── formatter.py            ← Markdown-форматирование (пост/Reels/план/тренды/бриф)
     ├── keyboards.py            ← inline-клавиатуры
     ├── errors.py               ← safe_generate/safe_transcribe/safe_search + каталог ошибок
     ├── logger.py               ← логирование в stdout
+    ├── scheduler.py            ← APScheduler: утренний трендовый бриф (V2.1, §20)
     └── state.py                ← aiogram FSM состояния диалога
 ```
 
@@ -196,6 +198,8 @@ LLM_BASE_URL=             # пусто → Anthropic; OpenRouter: https://openro
 LLM_MODEL=                # пусто → дефолт; OpenRouter: anthropic/claude-opus-4
 GROQ_API_KEY=             # console.groq.com (бесплатно) — голос, опционально
 TAVILY_API_KEY=           # app.tavily.com (бесплатно) — тренды V2, опционально
+TREND_DIGEST_TIME=09:00   # V2.1: время утреннего трендового брифа (HH:MM), дефолт 09:00
+TREND_TZ=Asia/Almaty      # V2.1: IANA-пояс брифа, дефолт Asia/Almaty
 OWNER_TELEGRAM_ID=        # @userinfobot
 DATABASE_PATH=/app/data/bot.db
 ```
@@ -206,7 +210,8 @@ Anthropic SDK или OpenAI-совместимый шлюз (OpenRouter) при 
 
 **Опциональные ключи-гейты:** без `GROQ_API_KEY` выключен голос (`VOICE_ENABLED`),
 без `TAVILY_API_KEY` выключены тренды (`TRENDS_ENABLED`) — раздел показывает подсказку
-«добавь ключ». Обучение стилю и контент-план (V2) работают на одном `ANTHROPIC_API_KEY`.
+«добавь ключ», а планировщик утреннего брифа (V2.1) не стартует. Обучение стилю и
+контент-план (V2) работают на одном `ANTHROPIC_API_KEY`.
 
 ---
 
@@ -236,7 +241,9 @@ Anthropic SDK или OpenAI-совместимый шлюз (OpenRouter) при 
 |---|---|
 | Bot V1 (MVP) | ✅ Реализован (Фазы 0–9); деплой на Railway — действие владельца |
 | Bot V2 (обучение стилю, контент-план, тренды) | ✅ Реализован (Фаза 11); тренды требуют `TAVILY_API_KEY` |
+| Bot V2.1 (утренний трендовый бриф + grounding в постах, §20) | ✅ Реализован (Фаза 11.1); требует `TAVILY_API_KEY` |
 | Bot V3 (ответы подписчикам, репурпозинг, аналитика) | ⏳ После V2 |
 
-**Следующий шаг:** живой смоук на Railway по чеклисту (Plan.md Фаза 10/11);
-для трендов — добавить `TAVILY_API_KEY` в переменные окружения Railway.
+**Следующий шаг:** живой смоук на Railway по чеклисту (Plan.md Фаза 10/11 + §20.7);
+для трендов и утреннего брифа — добавить `TAVILY_API_KEY` (и при желании
+`TREND_DIGEST_TIME`/`TREND_TZ`) в переменные окружения Railway.

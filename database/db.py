@@ -68,11 +68,22 @@ CREATE TABLE IF NOT EXISTS style_feedback (
 );
 """
 
+# Кэш трендового брифа за день (V2.1, §5.2/§20): одна строка на дату.
+_CREATE_TREND_BRIEF = """
+CREATE TABLE IF NOT EXISTS trend_brief (
+    brief_date TEXT PRIMARY KEY,
+    raw_search TEXT NOT NULL,
+    topics_json TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 _ALL_TABLES = (
     _CREATE_BRAND_PROFILE,
     _CREATE_PUBLICATIONS,
     _CREATE_DRAFTS,
     _CREATE_STYLE_FEEDBACK,
+    _CREATE_TREND_BRIEF,
 )
 
 
@@ -107,4 +118,4 @@ async def init_db() -> None:
         for ddl in _ALL_TABLES:
             await db.execute(ddl)
         await db.commit()
-    logger.info("База данных инициализирована: %s (4 таблицы)", config.DATABASE_PATH)
+    logger.info("База данных инициализирована: %s (5 таблиц)", config.DATABASE_PATH)

@@ -51,6 +51,9 @@ class Config:
     DATABASE_PATH: str
     VOICE_ENABLED: bool
     TRENDS_ENABLED: bool
+    # Трендовый бриф по расписанию (V2.1, §20): время «HH:MM» и IANA-пояс.
+    TREND_DIGEST_TIME: str
+    TREND_TZ: str
     # LLM-провайдер: если LLM_BASE_URL задан — используем OpenAI-совместимый
     # шлюз (например OpenRouter); иначе — прямой Anthropic API.
     LLM_BASE_URL: str | None
@@ -73,6 +76,10 @@ def _load_config() -> Config:
     tavily_key = os.getenv("TAVILY_API_KEY") or None
     trends_enabled = bool(tavily_key)
 
+    # Трендовый бриф по расписанию (V2.1, §20). Дефолты: 09:00, Asia/Almaty.
+    trend_digest_time = os.getenv("TREND_DIGEST_TIME") or "09:00"
+    trend_tz = os.getenv("TREND_TZ") or "Asia/Almaty"
+
     # Путь к БД: по умолчанию локально data/bot.db
     database_path = os.getenv("DATABASE_PATH", "data/bot.db")
 
@@ -92,6 +99,8 @@ def _load_config() -> Config:
         DATABASE_PATH=database_path,
         VOICE_ENABLED=voice_enabled,
         TRENDS_ENABLED=trends_enabled,
+        TREND_DIGEST_TIME=trend_digest_time,
+        TREND_TZ=trend_tz,
         LLM_BASE_URL=llm_base_url,
         LLM_MODEL=llm_model,
     )

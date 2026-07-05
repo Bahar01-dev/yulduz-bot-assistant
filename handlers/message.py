@@ -50,16 +50,28 @@ WRITING_POST_HOOKS = "✍️ Придумываю 3 варианта хука…
 WRITING_REEL_HOOKS = "🎬 Придумываю 3 варианта хука…"
 
 
-async def handle_post_request(message: Message, topic: str, state: FSMContext) -> None:
+async def handle_post_request(
+    message: Message,
+    topic: str,
+    state: FSMContext,
+    *,
+    user_id: int | None = None,
+    grounding: str | None = None,
+) -> None:
     """ШАГ 1 потока поста (Фаза 6, §7.2): генерируем 3 хука по теме.
 
     Загружает профиль + историю тем, показывает «печатает…», вызывает
     generate_hooks, парсит ответ. При успехе сохраняет сессию в FSM data
-    (topic, hooks), ставит состояние choosing_hook и показывает 3 кнопки хуков.
-    Ошибки LLM → RU-сообщение из GenerationResult (без тех.текста).
+    (topic, hooks, grounding), ставит состояние choosing_hook и показывает 3
+    кнопки хуков. Ошибки LLM → RU-сообщение из GenerationResult (без тех.текста).
+
+    user_id — явный id владельца: при вызове из колбэка (тап по теме брифа)
+    message — это сообщение бота, у него from_user = бот, поэтому id передаём.
+    grounding (V2.1, §20) — сырые факты из трендового брифа; None → обычный пост.
     """
-    user_id = message.from_user.id
-    logger.info("handle_post_request: тема=%r", topic)
+    if user_id is None:
+        user_id = message.from_user.id
+    logger.info("handle_post_request: тема=%r, grounding=%s", topic, bool(grounding))
 
     # Профиль + последние темы (дедуп §13.2) + примеры стиля (§13.3) — в системный промпт.
     profile = await brand_profile.get_by_user(user_id) or {}
@@ -74,6 +86,7 @@ async def handle_post_request(message: Message, topic: str, state: FSMContext) -
         topic=topic,
         bot=message.bot,
         style_examples=style_examples,
+        grounding=grounding,
     )
 
     # Ошибка генерации → дружелюбное RU-сообщение (+ алерт владельцу при необходимости)
@@ -93,8 +106,10 @@ async def handle_post_request(message: Message, topic: str, state: FSMContext) -
         await state.clear()
         return
 
-    # Сохраняем сессию поста и переходим к выбору хука (свободный текст не реролит)
-    await state.update_data(topic=topic, hooks=hooks)
+    # Сохраняем сессию поста и переходим к выбору хука (свободный текст не реролит).
+    # grounding пишем всегда (в т.ч. None) — чтобы факты прошлого брифа не «утекли»
+    # в обычный пост, если в сессии остались старые данные.
+    await state.update_data(topic=topic, hooks=hooks, grounding=grounding)
     await state.set_state(PostFlow.choosing_hook)
     await progress.finish(_render_hooks_message(hooks), reply_markup=hooks_keyboard(hooks))
 

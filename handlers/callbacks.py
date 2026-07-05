@@ -113,6 +113,7 @@ async def _generate_and_show_post(
     topic: str = data.get("topic", "")
     hooks: list[str] = list(data.get("hooks", []))
     selected: int | None = data.get("selected_hook")
+    grounding: str | None = data.get("grounding")
 
     if not topic or selected is None or selected >= len(hooks):
         # Сессия потеряна/неконсистентна — просим начать заново.
@@ -135,6 +136,7 @@ async def _generate_and_show_post(
         bot=callback.bot,
         temperature=temperature,
         style_examples=style_examples,
+        grounding=grounding,
     )
 
     if not result.ok:
@@ -562,6 +564,75 @@ async def on_reel_reject(callback: CallbackQuery, state: FSMContext) -> None:
     """👎 Отклонить сценарий → сохранить как пример плохого стиля (§13.3)."""
     await _save_style_feedback(
         callback, state, data_key="last_reel_text", verdict=style_feedback.REJECTED
+    )
+
+
+# ═══════════ Тап по теме трендового брифа → пост с grounding (V2.1, §20) ═══════════
+
+# Бриф пропал/устарел (кэш за другой день или его нет) — предлагаем обновить.
+BRIEF_STALE = "Бриф устарел. Нажми «🔁 Обновить», чтобы собрать свежий 🙏"
+
+
+@router.callback_query(F.data.startswith("trendtopic:"))
+async def on_trend_topic(callback: CallbackQuery, state: FSMContext) -> None:
+    """Тап по теме брифа: берём тему + факты (grounding) из кэша и пишем пост.
+
+    Без фильтра по состоянию — работает и под утренним брифом от планировщика.
+    callback_data = trendtopic:<brief_date>:<index>. Валидируем дату (== сегодня)
+    и индекс; grounding = raw_search из того же брифа → факты в хуках и посте
+    согласованы, повторный веб-поиск не нужен.
+    """
+    await callback.answer()
+
+    # Разбор callback_data: trendtopic:<date>:<index>
+    parts = callback.data.split(":")
+    if len(parts) != 3:
+        await callback.message.answer(BRIEF_STALE)
+        return
+    _, brief_date, raw_index = parts
+    try:
+        index = int(raw_index)
+    except ValueError:
+        await callback.message.answer(BRIEF_STALE)
+        return
+
+    from database import trend_brief  # локальный импорт во избежание циклов
+
+    # Кнопка со вчерашней датой или пропавший кэш → предлагаем обновить (§20.6).
+    if brief_date != trend_brief.today_str():
+        await callback.message.answer(BRIEF_STALE)
+        return
+
+    brief = await trend_brief.get(brief_date)
+    if not brief:
+        await callback.message.answer(BRIEF_STALE)
+        return
+
+    topics: list[str] = brief.get("topics") or []
+    if index < 0 or index >= len(topics):
+        await callback.message.answer(BRIEF_STALE)
+        return
+
+    topic = topics[index]
+    grounding = brief.get("raw_search") or None
+
+    # Убираем кнопки у брифа, чтобы повторные тапы не плодили потоки.
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    # Запускаем ШАГ 1 потока поста с фактами. user_id передаём явно: message —
+    # сообщение бота, у него from_user = бот.
+    from handlers.message import handle_post_request
+
+    await state.clear()
+    await handle_post_request(
+        callback.message,
+        topic,
+        state,
+        user_id=callback.from_user.id,
+        grounding=grounding,
     )
 
 

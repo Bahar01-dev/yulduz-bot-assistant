@@ -254,6 +254,30 @@ def trend_actions_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def brief_keyboard(brief_date: str, topics: list[str]) -> InlineKeyboardMarkup:
+    """Клавиатура утреннего трендового брифа (V2.1, §20).
+
+    По кнопке на тему (тап → пост с grounding), затем [🔁 Обновить] и [🏠 В меню].
+    callback_data темы = trendtopic:<brief_date>:<index> — дата+индекс обходят
+    лимит 64 байта (текст темы и grounding берутся из БД по дате). Текст кнопки —
+    номер + обрезанная тема, чтобы совпадал с нумерованным списком в сообщении.
+    """
+    builder = InlineKeyboardBuilder()
+    for idx, topic in enumerate(topics):
+        short = (topic or "").strip()
+        if len(short) > 32:
+            short = short[:31] + "…"
+        builder.button(
+            text=f"{idx + 1}. {short}",
+            callback_data=f"trendtopic:{brief_date}:{idx}",
+        )
+    builder.button(text="🔁 Обновить", callback_data="trend:refresh")
+    builder.button(text="🏠 В меню", callback_data="menu")
+    # По одной теме в ряд (длинный текст) + служебные кнопки отдельными строками.
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def main_menu_keyboard() -> InlineKeyboardMarkup:
     """Главное меню (spec.md §10 + V2-пункты «Контент-план» и «Тренды»).
 
