@@ -19,6 +19,7 @@ from aiogram.types import CallbackQuery, Message
 from agents import onboarding
 from database import brand_profile
 from handlers import is_owner  # noqa: F401  (гейт владельца — через middleware)
+from utils.errors import GenerationResult, Situation, alert_owner
 from utils.keyboards import (
     main_menu_keyboard,
     skip_forbidden_keyboard,
@@ -27,6 +28,10 @@ from utils.keyboards import (
 )
 from utils.logger import get_logger
 from utils.state import Onboarding
+
+# Готовое RU-сообщение сбоя записи в БД — из каталога ошибок (Situation.DB_ERROR),
+# чтобы онбординг реагировал на сбой так же, как все прочие записи в БД.
+_DB_ERROR_TEXT = GenerationResult.failure(Situation.DB_ERROR).user_message
 
 logger = get_logger(__name__)
 
@@ -188,16 +193,27 @@ async def on_refs(message: Message, state: FSMContext) -> None:
     # Краткое описание стиля: тон + ориентиры (используется в промптах Фаз 6/7)
     style_description = onboarding.build_style_description(tone_str, refs)
 
-    # Сохраняем профиль в БД
-    await brand_profile.create(
-        user_telegram_id=user_id,
-        niche=niche,
-        target_audience=audience,
-        tone=tone_str,
-        forbidden_words=forbidden or None,
-        reference_accounts=refs or None,
-        style_description=style_description or None,
-    )
+    # Сохраняем профиль в БД. Единственная запись онбординга — защищаем так же,
+    # как все прочие записи (menu.py/callbacks.py): при сбое БД показываем
+    # дружелюбное RU-сообщение из каталога, шлём алерт владельцу и НЕ чистим FSM,
+    # чтобы повторная отправка референсов ретраила сохранение (а не переигрывала
+    # все 5 шагов). state.clear() и резюме — только после успеха.
+    try:
+        await brand_profile.create(
+            user_telegram_id=user_id,
+            niche=niche,
+            target_audience=audience,
+            tone=tone_str,
+            forbidden_words=forbidden or None,
+            reference_accounts=refs or None,
+            style_description=style_description or None,
+        )
+    except Exception:
+        logger.exception("Ошибка сохранения профиля при онбординге (user=%s)", user_id)
+        await message.answer(_DB_ERROR_TEXT)
+        await alert_owner(message.bot, "Ошибка сохранения профиля (онбординг) в БД.")
+        return
+
     logger.info("Онбординг завершён, профиль сохранён (user=%s)", user_id)
 
     # Очищаем FSM — онбординг окончен

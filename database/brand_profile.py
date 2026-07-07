@@ -29,7 +29,13 @@ async def create(
     reference_accounts: str | None = None,
     style_description: str | None = None,
 ) -> None:
-    """Создаёт профиль бренда для пользователя."""
+    """Создаёт профиль бренда для пользователя (идемпотентно).
+
+    ON CONFLICT(user_telegram_id) DO UPDATE: повторный онбординг, гонка двух
+    /start или ретрай после сбоя не падают с IntegrityError, а перезаписывают
+    профиль (created_at сохраняется, updated_at обновляется). Тот же паттерн
+    upsert, что и в database/trend_brief.upsert().
+    """
     async with get_connection() as db:
         await db.execute(
             """
@@ -37,6 +43,14 @@ async def create(
                 user_telegram_id, niche, target_audience, tone,
                 forbidden_words, reference_accounts, style_description
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_telegram_id) DO UPDATE SET
+                niche = excluded.niche,
+                target_audience = excluded.target_audience,
+                tone = excluded.tone,
+                forbidden_words = excluded.forbidden_words,
+                reference_accounts = excluded.reference_accounts,
+                style_description = excluded.style_description,
+                updated_at = CURRENT_TIMESTAMP
             """,
             (
                 user_telegram_id,
@@ -49,7 +63,7 @@ async def create(
             ),
         )
         await db.commit()
-    logger.info("Создан профиль бренда для user_telegram_id=%s", user_telegram_id)
+    logger.info("Сохранён профиль бренда для user_telegram_id=%s", user_telegram_id)
 
 
 async def get_by_user(user_telegram_id: int) -> dict | None:
